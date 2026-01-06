@@ -1,0 +1,97 @@
+---
+- name: Install Calibre-Web on Ubuntu 24.04 using Docker
+  hosts: all
+  become: true
+
+  vars:
+    calibre_web_container_name: calibre-web
+    calibre_web_image: linuxserver/calibre-web:latest
+    calibre_web_port: 8083
+    calibre_web_config_dir: /opt/calibre-web/config
+    calibre_web_library_dir: /opt/calibre-web/library
+
+  tasks:
+    - name: Update APT packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install required dependencies
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Add Docker GPG key
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker repository
+      ansible.builtin.shell: |
+        echo "deb [arch=$(dpkg --print-architecture) \
+        signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Update APT cache after adding Docker repo
+      apt:
+        update_cache: yes
+
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create Calibre-Web config directory
+      file:
+        path: "{{ calibre_web_config_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create Calibre-Web library directory
+      file:
+        path: "{{ calibre_web_library_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Pull Calibre-Web Docker image
+      community.docker.docker_image:
+        name: "{{ calibre_web_image }}"
+        source: pull
+
+    - name: Run Calibre-Web container
+      community.docker.docker_container:
+        name: "{{ calibre_web_container_name }}"
+        image: "{{ calibre_web_image }}"
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ calibre_web_port }}:8083"
+        volumes:
+          - "{{ calibre_web_config_dir }}:/config"
+          - "{{ calibre_web_library_dir }}:/books"
+        env:
+          PUID: "1000"
+          PGID: "1000"
+          DOCKER_MODS: "linuxserver/mods:universal-calibre"  # optional: include calibre binary

@@ -1,0 +1,87 @@
+---
+- name: Install MeTube on Ubuntu 24.04 using Docker
+  hosts: all
+  become: true
+
+  vars:
+    metube_container_name: metube
+    metube_image: ghcr.io/alexta69/metube:latest
+    metube_download_dir: /opt/metube/downloads   # Change this if needed
+    metube_port: 8081
+
+  tasks:
+    - name: Update and upgrade APT packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install required dependencies
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Add Docker GPG key
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker repository
+      ansible.builtin.shell: |
+        echo "deb [arch=$(dpkg --print-architecture) \
+        signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Update APT cache after adding Docker repo
+      apt:
+        update_cache: yes
+
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create MeTube downloads directory
+      file:
+        path: "{{ metube_download_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Pull MeTube Docker image
+      community.docker.docker_image:
+        name: "{{ metube_image }}"
+        source: pull
+
+    - name: Run MeTube container
+      community.docker.docker_container:
+        name: "{{ metube_container_name }}"
+        image: "{{ metube_image }}"
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ metube_port }}:8081"
+        volumes:
+          - "{{ metube_download_dir }}:/downloads"
+        env:
+          DOWNLOAD_MODE: "limited"         # Optional: sequential | concurrent | limited
+          MAX_CONCURRENT_DOWNLOADS: "3"    # Used when DOWNLOAD_MODE is limited
+          DEFAULT_THEME: "auto"
